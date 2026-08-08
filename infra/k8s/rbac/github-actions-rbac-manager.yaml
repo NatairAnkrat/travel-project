@@ -1,0 +1,24 @@
+# infra/k8s/rbac/github-actions-rbac-manager.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: github-actions-rbac-manager
+  namespace: natairankrat-dev
+rules:
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-actions-rbac-manager-binding
+  namespace: natairankrat-dev
+subjects:
+  - kind: ServiceAccount
+    name: github-actions-deployer
+    namespace: natairankrat-dev
+roleRef:
+  kind: Role
+  name: github-actions-rbac-manager
+  apiGroup: rbac.authorization.k8s.io

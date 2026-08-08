@@ -28,7 +28,6 @@ jobs:
           oc apply -f infra/k8s/postgres/
           oc apply -f infra/k8s/monitoring/
           oc apply -f infra/k8s/keepalive/
-          oc apply -f infra/k8s/networking/
           oc apply -f infra/k8s/frontend-demo/
 
       - name: Verify rollout

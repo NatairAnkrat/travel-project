@@ -1,0 +1,36 @@
+name: Deploy to OpenShift
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/k8s/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install oc CLI
+        uses: redhat-actions/oc-installer@v1
+        with:
+          oc_version: "4.15"
+
+      - name: Log in to OpenShift
+        run: |
+          oc login --token="${{ secrets.OC_TOKEN }}" --server="${{ secrets.OC_SERVER }}"
+
+      - name: Apply manifests
+        run: |
+          oc apply -f infra/k8s/postgres/
+          oc apply -f infra/k8s/monitoring/
+          oc apply -f infra/k8s/keepalive/
+          oc apply -f infra/k8s/networking/
+          oc apply -f infra/k8s/frontend-demo/
+
+      - name: Verify rollout
+        run: |
+          oc get pods -n natairankrat-dev

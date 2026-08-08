@@ -1,0 +1,56 @@
+name: Build and Push Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend-java/**'
+      - 'backend-python/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-java:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend-java
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend-java
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/backend-java:latest
+            ghcr.io/${{ github.repository_owner }}/backend-java:${{ github.sha }}
+
+  build-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend-python
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend-python
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/backend-python:latest
+            ghcr.io/${{ github.repository_owner }}/backend-python:${{ github.sha }}

@@ -1,0 +1,11 @@
+# infra/k8s/postgres/cold-backup-pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-cold-backup
+  namespace: natairankrat-dev
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi

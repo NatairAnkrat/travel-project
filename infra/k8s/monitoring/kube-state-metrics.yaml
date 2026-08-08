@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-state-metrics
+  namespace: natairankrat-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-state-metrics
+  template:
+    metadata:
+      labels:
+        app: kube-state-metrics
+    spec:
+      serviceAccountName: kube-state-metrics
+      containers:
+        - name: kube-state-metrics
+          image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.13.0
+          args:
+            - "--namespaces=natairankrat-dev"
+            - "--resources=pods,deployments,replicasets,statefulsets,jobs,cronjobs"
+            - "--port=8080"
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "25m"
+            limits:
+              memory: "96Mi"
+              cpu: "100m"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-state-metrics
+  namespace: natairankrat-dev
+spec:
+  selector:
+    app: kube-state-metrics
+  ports:
+    - port: 8080
+      targetPort: 8080

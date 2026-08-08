@@ -1,0 +1,14 @@
+# infra/k8s/postgres/main-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-main
+  namespace: natairankrat-dev
+spec:
+  clusterIP: None
+  selector:
+    app: postgres
+    role: main
+  ports:
+    - port: 5432
+      targetPort: 5432

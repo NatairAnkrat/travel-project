@@ -1,0 +1,50 @@
+# infra/k8s/postgres/cold-standby-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-cold-standby
+  namespace: natairankrat-dev
+spec:
+  serviceName: postgres-cold-standby
+  replicas: 0
+  selector:
+    matchLabels:
+      app: postgres
+      role: cold-standby
+  template:
+    metadata:
+      labels:
+        app: postgres
+        role: cold-standby
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          args: ["postgres"]
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: postgres-main-secret
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: cold-storage
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "appuser", "-d", "traveldb"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: cold-storage
+          persistentVolumeClaim:
+            claimName: postgres-cold-backup

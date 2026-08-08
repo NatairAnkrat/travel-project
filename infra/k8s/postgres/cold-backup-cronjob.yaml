@@ -1,0 +1,48 @@
+# infra/k8s/postgres/cold-backup-cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-cold-backup
+  namespace: natairankrat-dev
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: postgres:16
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgres-main-secret
+                      key: REPLICATION_PASSWORD
+              command:
+                - bash
+                - -c
+                - |
+                  set -e
+                  rm -rf /var/lib/postgresql/data/pgdata/*
+                  pg_basebackup \
+                    -h postgres-main-0.postgres-main \
+                    -D /var/lib/postgresql/data/pgdata \
+                    -U replicator -Fp -Xs -P
+              volumeMounts:
+                - name: cold-storage
+                  mountPath: /var/lib/postgresql/data
+              resources:
+                requests:
+                  memory: "256Mi"
+                  cpu: "250m"
+                limits:
+                  memory: "512Mi"
+                  cpu: "500m"
+          volumes:
+            - name: cold-storage
+              persistentVolumeClaim:
+                claimName: postgres-cold-backup

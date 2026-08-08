@@ -1,0 +1,12 @@
+# infra/k8s/frontend-demo/nginx-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-demo
+  namespace: natairankrat-dev
+spec:
+  selector:
+    app: nginx-demo
+  ports:
+    - port: 8080
+      targetPort: 8080

@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alert-rules
+  namespace: natairankrat-dev
+data:
+  alerts.yml: |
+    groups:
+      - name: postgres
+        rules:
+          - alert: PostgresDown
+            expr: pg_up == 0
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Postgres instance {{ $labels.instance }} is down"
+              description: "postgres_exporter has been unable to reach {{ $labels.instance }} for over 2 minutes. The pod may have crashed or hung."
+
+          - alert: PostgresExporterScrapeFailing
+            expr: up{job=~"postgres-main|postgres-hot-standby"} == 0
+            for: 3m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Prometheus cannot reach exporter {{ $labels.instance }}"
+              description: "The exporter itself is unreachable (not to be confused with PostgresDown — that refers to the exporter pod itself, not the database inside it)."
+
+          - alert: PostgresHighConnections
+            expr: sum(pg_stat_activity_count{datname="traveldb"}) by (instance) > 80
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Postgres {{ $labels.instance }} is close to the connection limit."
+              description: "Active connections: {{ $value }}; max_connections is usually 100 — we are approaching the limit."
+
+      - name: routes
+        rules:
+          - alert: RouteUnreachable
+            expr: probe_success == 0
+            for: 3m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Route {{ $labels.instance }} is unreachable"
+              description: "blackbox_exporter has been unable to receive an HTTPS response for over 3 minutes."
+
+      - name: kubernetes
+        rules:
+          - alert: PodCrashLooping
+            expr: kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"} == 1
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Pod {{ $labels.pod }} is stuck in a CrashLoopBackOff loop."
+              description: "Container {{ $labels.container }} in pod {{ $labels.pod }} has been crashing and restarting continuously for over 2 minutes."
+
+          - alert: DeploymentReplicasMismatch
+            expr: kube_deployment_spec_replicas != kube_deployment_status_replicas_available
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Deployment {{ $labels.deployment }}: fewer replicas than desired"
+              description: "The number of available replicas has been lower than the spec-defined count for over 10 minutes. IMPORTANT: This will also trigger during a standard scale-to-zero event initiated by Idler in the Sandbox—this is an expected false positive; do not confuse it with an actual failure."
+        
+          - alert: PodNotReady
+            expr: kube_pod_status_ready{condition="false"} == 1 unless on(pod) kube_pod_status_phase{phase="Succeeded"}
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod {{ $labels.pod }} has not been Ready for over 5 minutes."
+              description: "The pod has failed its readiness check for over 5 minutes. There might be an issue with the container, resources, or scheduling."

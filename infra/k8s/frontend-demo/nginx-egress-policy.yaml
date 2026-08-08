@@ -1,0 +1,25 @@
+# infra/k8s/frontend-demo/nginx-egress-policy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nginx-demo-egress
+  namespace: natairankrat-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: nginx-demo
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-dns
+      ports:
+        - protocol: UDP
+          port: 5353

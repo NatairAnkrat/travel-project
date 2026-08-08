@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: keepalive-ping
+  namespace: natairankrat-dev
+spec:
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: keepalive
+              image: curlimages/curl:8.9.1
+              command:
+                - sh
+                - -c
+                - |
+                  set -x
+                  curl -k -s -m 30 -o /dev/null -w "nginx-demo: %{http_code}\n" \
+                    https://nginx-demo-natairankrat-dev.apps.rm2.thpm.p1.openshiftapps.com || true
+                  curl -k -s -m 30 -o /dev/null -w "grafana: %{http_code}\n" \
+                    https://grafana-natairankrat-dev.apps.rm2.thpm.p1.openshiftapps.com || true
+              resources:
+                requests:
+                  memory: "16Mi"
+                  cpu: "10m"
+                limits:
+                  memory: "32Mi"
+                  cpu: "50m"

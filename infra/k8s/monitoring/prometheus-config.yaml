@@ -1,0 +1,28 @@
+# infra/k8s/monitoring/prometheus-config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: natairankrat-dev
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    scrape_configs:
+      - job_name: 'postgres-main'
+        static_configs:
+          - targets: ['postgres-exporter-main:9187']
+            labels:
+              instance_role: 'main'
+
+      - job_name: 'postgres-hot-standby'
+        static_configs:
+          - targets: ['postgres-exporter-hot-standby:9187']
+            labels:
+              instance_role: 'hot-standby'
+
+      - job_name: 'prometheus-self'
+        static_configs:
+          - targets: ['localhost:9090']

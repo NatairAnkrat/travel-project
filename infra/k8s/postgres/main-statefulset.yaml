@@ -1,0 +1,66 @@
+# infra/k8s/postgres/main-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-main
+  namespace: natairankrat-dev
+spec:
+  serviceName: postgres-main
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+      role: main
+  template:
+    metadata:
+      labels:
+        app: postgres
+        role: main
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: postgres-main-secret
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "appuser", "-d", "traveldb"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "appuser", "-d", "traveldb"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          args: ["-c", "wal_level=replica", "-c", "max_wal_senders=5", "-c", "max_replication_slots=5"]
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: postgres-main-init
+            defaultMode: 0755
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-storage
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi

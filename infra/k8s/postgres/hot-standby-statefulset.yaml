@@ -1,0 +1,80 @@
+# infra/k8s/postgres/hot-standby-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-hot-standby
+  namespace: natairankrat-dev
+spec:
+  serviceName: postgres-hot-standby
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+      role: hot-standby
+  template:
+    metadata:
+      labels:
+        app: postgres
+        role: hot-standby
+    spec:
+      initContainers:
+        - name: init-replica
+          image: postgres:16
+          envFrom:
+            - secretRef:
+                name: postgres-main-secret
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          command:
+            - bash
+            - -c
+            - |
+              if [ -z "$(ls -A $PGDATA 2>/dev/null)" ]; then
+                PGPASSWORD=$REPLICATION_PASSWORD pg_basebackup \
+                  -h postgres-main-0.postgres-main \
+                  -D $PGDATA -U replicator -Fp -Xs -P -R
+              fi
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+      containers:
+        - name: postgres
+          image: postgres:16
+          args: ["-c", "hot_standby=on"]
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: postgres-main-secret
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "appuser", "-d", "traveldb"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "appuser", "-d", "traveldb"]
+            initialDelaySeconds: 40
+            periodSeconds: 20
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-storage
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi

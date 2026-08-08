@@ -1,0 +1,14 @@
+# infra/k8s/postgres/hot-standby-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-hot-standby
+  namespace: natairankrat-dev
+spec:
+  clusterIP: None
+  selector:
+    app: postgres
+    role: hot-standby
+  ports:
+    - port: 5432
+      targetPort: 5432

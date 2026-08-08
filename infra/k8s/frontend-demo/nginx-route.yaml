@@ -1,0 +1,16 @@
+# infra/k8s/frontend-demo/nginx-route.yaml
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: nginx-demo
+  namespace: natairankrat-dev
+spec:
+  to:
+    kind: Service
+    name: nginx-demo
+    weight: 100
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

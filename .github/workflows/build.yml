@@ -6,6 +6,8 @@ on:
     paths:
       - 'backend-java/**'
       - 'backend-python/**'
+      - 'backend-python/search-service/**'
+      - 'backend-python/recommendation-service/**'
   workflow_dispatch:
 
 permissions:
@@ -60,3 +62,51 @@ jobs:
           tags: |
             ghcr.io/${{ env.OWNER_LC }}/backend-python:latest
             ghcr.io/${{ env.OWNER_LC }}/backend-python:${{ github.sha }}
+
+  build-search-service:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set lowercase owner
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push search-service
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend-python/search-service
+          push: true
+          tags: |
+            ghcr.io/${{ env.OWNER_LC }}/search-service:latest
+            ghcr.io/${{ env.OWNER_LC }}/search-service:${{ github.sha }}
+
+  build-recommendation-service:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set lowercase owner
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push recommendation-service
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend-python/recommendation-service
+          push: true
+          tags: |
+            ghcr.io/${{ env.OWNER_LC }}/recommendation-service:latest
+            ghcr.io/${{ env.OWNER_LC }}/recommendation-service:${{ github.sha }}

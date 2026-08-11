@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recommendation-service
+  namespace: natairankrat-dev
+spec:
+  replicas: 1 # keep at 1 while jobs live in-process via BackgroundTasks - see main.py docstring
+  selector:
+    matchLabels:
+      app: recommendation-service
+  template:
+    metadata:
+      labels:
+        app: recommendation-service
+    spec:
+      containers:
+        - name: recommendation-service
+          image: ghcr.io/natairankrat/recommendation-service:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DB_HOST
+              value: postgres-main   # writes must go to main, not hot/cold standbys
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: traveldb
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-main-secret
+                  key: POSTGRES_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-main-secret
+                  key: POSTGRES_PASSWORD
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: external-apis-secret
+                  key: ANTHROPIC_API_KEY
+            - name: GOOGLE_MAPS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: external-apis-secret
+                  key: GOOGLE_MAPS_API_KEY
+            - name: SEARCH_SERVICE_URL
+              value: http://search-service:8000
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: recommendation-service
+  namespace: natairankrat-dev
+spec:
+  selector:
+    app: recommendation-service
+  ports:
+    - port: 8000
+      targetPort: 8000

@@ -28,7 +28,7 @@ FINAL_TOOL_NAME = "propose_itineraries"
 PLACES_TOOL_NAME = "search_nearby_places"
 DIRECTIONS_TOOL_NAME = "get_directions"
 WEB_SEARCH_TOOL_NAME = "search_web"
-MAX_TOOL_ITERATIONS = 40  # hard cap on tool round trips per option, to bound cost/latency
+MAX_TOOL_ITERATIONS = 20  # hard cap on tool round trips per option, to bound cost/latency
 
 # Grounding facts so Claude doesn't guess at transport costs from stale
 # training data - Berlin fares changed on 2026-01-01 (VBB fare increase,
@@ -347,21 +347,39 @@ class ClaudeItineraryClient:
         self._directions_client = directions_client or GoogleMapsDirectionsClient()
         self._search_service_client = search_service_client or SearchServiceClient()
 
-    def generate_option(self, request: TripPlanningRequest, tier: BudgetTier) -> GenerationResult:
-        """Generates a SINGLE itinerary option per call. Runs a real
+    def generate_option(
+        self,
+        request: TripPlanningRequest,
+        tier: BudgetTier,
+        known_places: list[dict] | None = None,
+        previous_option: dict | None = None,
+        edit_instruction: str | None = None,
+    ) -> GenerationResult:
+        """Generates a single itinerary option per call. Runs a real
         tool-use loop: Claude can call search_nearby_places and
         get_directions as many times as it needs (up to
         MAX_TOOL_ITERATIONS) to ground the plan in real places and real
         travel times before submitting the final structured itinerary via
         propose_itineraries.
 
-        Every place search_nearby_places returns during this call is
-        collected into found_places, local to this call (not shared across
-        tiers) - recommendation_stage.py uses it afterward to check that
-        every meal/activity item in the final answer actually matches a
-        real result, not something Claude wrote from memory.
+        known_places carries real places found while generating earlier tiers
+        of the same trip (same city). They are injected into the prompt so
+        Claude can reuse them directly instead of re-searching the same city
+        once per tier, and they SEED found_places so recommendation_stage's
+        real-place check still passes when Claude reuses one (they are real
+        results of a prior search_nearby_places call). Every place found
+        during this call is added on top - the combined list is the ground
+        truth the final answer is checked against.
+
+        previous_option / edit_instruction turn this into an EDIT of an
+        existing plan (see edit-service): the prior tier plan is injected so
+        Claude revises it instead of planning from scratch, and its real
+        meal/activity venues seed found_places too, so reusing them passes
+        the real-place check without re-searching.
         """
-        found_places: list[dict] = []
+        found_places: list[dict] = list(known_places or [])
+        if previous_option is not None:
+            found_places = self._dedup_places(found_places + self._places_from_option(previous_option))
         tools = [
             {
                 "name": PLACES_TOOL_NAME,
@@ -385,18 +403,27 @@ class ClaudeItineraryClient:
             },
         ]
 
-        messages = [{"role": "user", "content": self._build_user_message(request, tier)}]
+        messages = [
+            {"role": "user", "content": [{"type": "text", "text": self._build_user_message(
+                request, tier, found_places, previous_option, edit_instruction)}]}
+        ]
 
         for _ in range(MAX_TOOL_ITERATIONS):
+            # Prompt caching: the static prefix (tools + system) and the
+            # append-only history are re-sent on every round trip, so mark them
+            # so all but the newest turn is read from cache (~0.1x price)
+            # instead of reprocessed at full price. See _apply_prompt_caching.
+            self._apply_prompt_caching(messages)
             # Streaming is required, not optional: the SDK refuses plain
             # .create() once max_tokens is high enough that generation could
             # plausibly exceed its non-streaming timeout window.
             with self._client.messages.stream(
                 model=self._model,
-                max_tokens=32000,  # Sonnet 5 supports up to 128k; 32k comfortably covers one full option
-                system=SYSTEM_PROMPT,
+                max_tokens=20000,  # Sonnet 5 supports up to 128k; 20k covers one full option with headroom
+                system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
                 tools=tools,
                 tool_choice={"type": "auto"},  # Claude decides: search more, get directions, or submit
+                output_config={"effort": "medium"},  # cap thinking depth; "low" saves more, verify quality first
                 messages=messages,
             ) as stream:
                 response = stream.get_final_message()
@@ -432,6 +459,59 @@ class ClaudeItineraryClient:
         raise ItineraryGenerationError(
             f"Exceeded {MAX_TOOL_ITERATIONS} tool-use round trips without a final answer"
         )
+
+    @staticmethod
+    def _apply_prompt_caching(messages: list[dict]) -> None:
+        """Keeps exactly one rolling cache breakpoint on the last content
+        block of the newest message, so each round trip reads the entire
+        prior conversation from cache and pays full price only for the newest
+        turn. Together with the cache_control on `system` (which also covers
+        `tools`, since tools render before system), that's 2 breakpoints per
+        request - within the API's limit of 4. Only user-message blocks are
+        dicts we own; assistant turns hold SDK block objects, which are left
+        untouched (and are never the last message, so never need a marker).
+        """
+        for message in messages:
+            content = message.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict):
+                        block.pop("cache_control", None)
+        last_content = messages[-1].get("content")
+        if isinstance(last_content, list) and last_content and isinstance(last_content[-1], dict):
+            last_content[-1]["cache_control"] = {"type": "ephemeral"}
+
+    @staticmethod
+    def _places_from_option(option: dict) -> list[dict]:
+        """Pulls the real meal/activity venues out of a prior itinerary option
+        into the same shape search_nearby_places returns, so an EDIT can reuse
+        them (name/coords/maps_url) without re-searching. Only items with real
+        coordinates count - those are the ones that came from a real search."""
+        places: list[dict] = []
+        for day in option.get("days", []) or []:
+            for item in day.get("items", []) or []:
+                if item.get("type") in ("meal", "activity") and item.get("latitude") is not None and item.get("longitude") is not None:
+                    places.append({
+                        "name": item.get("title"),
+                        "address": item.get("location"),
+                        "latitude": item.get("latitude"),
+                        "longitude": item.get("longitude"),
+                        "maps_url": item.get("url"),
+                    })
+        return places
+
+    @staticmethod
+    def _dedup_places(places: list[dict]) -> list[dict]:
+        seen: set = set()
+        out: list[dict] = []
+        for p in places:
+            key = p.get("maps_url") or (
+                p.get("name"), round(p.get("latitude") or 0.0, 5), round(p.get("longitude") or 0.0, 5)
+            )
+            if key not in seen:
+                seen.add(key)
+                out.append(p)
+        return out
 
     def _execute_tool_call(self, block, found_places: list[dict]) -> dict:
         if block.name == PLACES_TOOL_NAME:
@@ -482,13 +562,64 @@ class ClaudeItineraryClient:
         )
 
     @staticmethod
-    def _build_user_message(request: TripPlanningRequest, tier: BudgetTier) -> str:
+    def _build_user_message(
+        request: TripPlanningRequest,
+        tier: BudgetTier,
+        known_places: list[dict],
+        previous_option: dict | None = None,
+        edit_instruction: str | None = None,
+    ) -> str:
+        edit_section = ""
+        if previous_option is not None or edit_instruction:
+            change_line = (
+                f"Requested changes: {edit_instruction}"
+                if edit_instruction
+                else "Requested changes: parameters changed - see the updated GROUPS / TRAVEL PACE / "
+                     "USER PREFERENCES / offers below and adjust the plan to match them."
+            )
+            prev_block = (
+                f"Previous plan for this tier (revise it, don't discard it):\n"
+                f"{json.dumps(previous_option, ensure_ascii=False)}\n\n"
+                if previous_option is not None else ""
+            )
+            edit_section = (
+                f"EDIT REQUEST - you are REVISING an existing itinerary for this tier, not planning "
+                f"from scratch.\n"
+                f"{prev_block}"
+                f"{change_line}\n"
+                f"Keep everything in the previous plan that still satisfies the hard rules and the "
+                f"requested changes; change only what the request actually requires. Reuse places from "
+                f"'REAL PLACES ALREADY FOUND' below directly (copy name/latitude/longitude/maps_url) "
+                f"instead of re-searching, and only call {PLACES_TOOL_NAME} for genuinely new needs the "
+                f"change introduces. All hard rules and time/duration rules still apply to the result.\n\n"
+            )
+        known_section = ""
+        if known_places:
+            # Real places already found while planning earlier tiers of this
+            # same trip. Injecting them lets Claude reuse a place directly
+            # instead of re-searching the same city per tier. Rating-sorted and
+            # capped to bound the message size.
+            top = sorted(known_places, key=lambda p: p.get("rating") or 0, reverse=True)[:60]
+            compact = [
+                {k: p.get(k) for k in ("name", "type", "address", "rating", "latitude", "longitude", "maps_url")}
+                for p in top
+            ]
+            known_section = (
+                f"REAL PLACES ALREADY FOUND IN THIS CITY (all real {PLACES_TOOL_NAME} results "
+                f"from earlier planning of this same trip). You MAY reuse any of these directly: "
+                f"copy its exact name/latitude/longitude/maps_url into a schedule item WITHOUT "
+                f"calling {PLACES_TOOL_NAME} again. Only search for something new when none of "
+                f"these fit the need (wrong cuisine, wrong area, etc.):\n"
+                f"{json.dumps(compact, indent=2, ensure_ascii=False)}\n\n"
+            )
         return (
             f"Plan the '{tier.name}' itinerary option for this Berlin trip, using ONLY "
             f"the flight and hotel offers listed below, real places found via "
             f"{PLACES_TOOL_NAME}, real travel times found via {DIRECTIONS_TOOL_NAME}, and "
             f"current prices/facts found via {WEB_SEARCH_TOOL_NAME}.\n\n"
             f"TIER INSTRUCTIONS: {tier.instructions}\n\n"
+            f"{edit_section}"
+            f"{known_section}"
             f"GROUPS (each group's own `preferences` field, if any, is separate from the "
             f"trip-wide USER PREFERENCES below - see rule 12 for how to weigh them together "
             f"at shared meals/activities):\n"

@@ -51,7 +51,14 @@ def run(
     hotel_offers: list[dict],
     client: ClaudeItineraryClient | None = None,
     search_client: SearchServiceClient | None = None,
+    previous_itinerary: dict | None = None,
+    edit_instruction: str | None = None,
 ) -> RunResult:
+    """When previous_itinerary/edit_instruction are given, this is an EDIT: each
+    tier revises its counterpart from the previous proposal (matched by
+    option_id) instead of planning from scratch, and the change request is
+    passed to the model. previous_itinerary is a prior proposal dict, i.e.
+    {"options": [<ItineraryOption>, ...]}."""
     filtered_prefs = filter_preferences(user_preferences)
     for dropped in filtered_prefs.dropped:
         print(f"[info] Preference dropped (not groundable): '{dropped.text}' - {dropped.reason}")
@@ -73,9 +80,30 @@ def run(
 
     options = []
     found_places_by_option: dict[int, list[dict]] = {}
+    # Real places found while generating earlier tiers, reused by later tiers so
+    # the same city isn't searched from scratch three times (see
+    # ClaudeItineraryClient.generate_option's known_places). Deduped by maps_url,
+    # falling back to name + rounded coords.
+    known_places: list[dict] = []
+    seen_place_keys: set = set()
+    # For an edit: index the previous proposal's options by option_id so each
+    # tier revises its own prior counterpart.
+    prev_options_by_id = {
+        o.get("option_id"): o for o in (previous_itinerary or {}).get("options", []) if isinstance(o, dict)
+    }
+    prev_options_list = [o for o in (previous_itinerary or {}).get("options", []) if isinstance(o, dict)]
     for option_id, tier in enumerate(TIERS, start=1):
+        previous_option = prev_options_by_id.get(option_id) or (
+            prev_options_list[option_id - 1] if option_id - 1 < len(prev_options_list) else None
+        )
         try:
-            result = itinerary_client.generate_option(request, tier)
+            result = itinerary_client.generate_option(
+                request,
+                tier,
+                known_places=known_places,
+                previous_option=previous_option,
+                edit_instruction=edit_instruction,
+            )
         except ItineraryGenerationError as exc:
             # One tier failing shouldn't sink the whole trip plan - log
             # and continue, so the person still gets whatever tiers did
@@ -94,6 +122,19 @@ def run(
 
         options.append(option)
         found_places_by_option[option_id] = result.found_places
+        # Feed this tier's real places forward so the next tier can reuse them
+        # instead of re-searching. result.found_places already includes the
+        # known_places we passed in (they're seeded), so dedup skips those and
+        # only genuinely new venues are added.
+        for place in result.found_places:
+            key = place.get("maps_url") or (
+                place.get("name"),
+                round(place.get("latitude") or 0.0, 5),
+                round(place.get("longitude") or 0.0, 5),
+            )
+            if key not in seen_place_keys:
+                seen_place_keys.add(key)
+                known_places.append(place)
 
     if not options:
         raise ItineraryGenerationError("All itinerary options failed to generate")

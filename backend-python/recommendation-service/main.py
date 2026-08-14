@@ -57,6 +57,11 @@ def health():
 class RecommendationRequest(TripPlanningRequest):
     travel_version_id: str
     requested_by: str
+    # Present only when this generation is an EDIT of a prior version (see
+    # edit-service). previous_itinerary is the prior proposal dict
+    # ({"options": [...]}); edit_instruction is the free-text change request.
+    previous_itinerary: dict | None = None
+    edit_instruction: str | None = None
 
 
 class RecommendationCreatedResponse(BaseModel):
@@ -75,7 +80,8 @@ def create_recommendation(request: RecommendationRequest, background_tasks: Back
 
     handle = jobs.create_job(request.travel_version_id, request.requested_by, trip_request)
     background_tasks.add_task(_run_job, handle, request.groups, request.user_preferences,
-                               request.travel_pace, request.flight_offers, request.hotel_offers)
+                               request.travel_pace, request.flight_offers, request.hotel_offers,
+                               request.previous_itinerary, request.edit_instruction)
 
     return RecommendationCreatedResponse(job_id=handle.ai_job_id)
 
@@ -95,6 +101,8 @@ def _run_job(
     travel_pace: str,
     flight_offers: list[dict],
     hotel_offers: list[dict],
+    previous_itinerary: dict | None = None,
+    edit_instruction: str | None = None,
 ) -> None:
     """Runs on FastAPI's background thread pool, after the 202 response
     has already been sent - errors here can't propagate to an HTTP
@@ -107,6 +115,7 @@ def _run_job(
             groups=groups, user_preferences=user_preferences, travel_pace=travel_pace,
             flight_offers=flight_offers, hotel_offers=hotel_offers, client=client,
             search_client=SearchServiceClient(),
+            previous_itinerary=previous_itinerary, edit_instruction=edit_instruction,
         )
         jobs.complete_job(handle, result.proposal)
 

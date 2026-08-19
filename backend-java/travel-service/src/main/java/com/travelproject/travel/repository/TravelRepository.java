@@ -1,6 +1,6 @@
-package com.travelproject.backend.repository;
+package com.travelproject.travel.repository;
 
-import com.travelproject.backend.dto.CreateTravelRequest;
+import com.travelproject.travel.dto.CreateTravelRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import java.sql.Date;
@@ -14,6 +14,14 @@ public class TravelRepository {
 
     public TravelRepository(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
+    }
+
+    public boolean isGroupMember(UUID groupId, UUID userId) {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'active'",
+                Integer.class, groupId, userId
+        );
+        return count != null && count > 0;
     }
 
     public UUID[] createTravelWithFirstVersion(CreateTravelRequest req) {

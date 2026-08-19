@@ -1,4 +1,4 @@
-package com.travelproject.backend.controller;
+package com.travelproject.travel.controller;
 
 import com.travelproject.backend.service.ProxyForwarder;
 import org.springframework.beans.factory.annotation.Value;

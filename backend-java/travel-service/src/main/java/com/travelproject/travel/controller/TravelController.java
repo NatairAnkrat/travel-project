@@ -1,9 +1,11 @@
-package com.travelproject.backend.controller;
+package com.travelproject.travel.controller;
 
-import com.travelproject.backend.client.RecommendationServiceClient;
-import com.travelproject.backend.dto.CreateTravelRequest;
-import com.travelproject.backend.dto.CreateTravelResponse;
-import com.travelproject.backend.repository.TravelRepository;
+import com.travelproject.travel.client.RecommendationServiceClient;
+import com.travelproject.travel.dto.CreateTravelRequest;
+import com.travelproject.travel.dto.CreateTravelResponse;
+import com.travelproject.travel.repository.AuditLogRepository;
+import com.travelproject.travel.repository.TravelRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -15,17 +17,27 @@ public class TravelController {
 
     private final TravelRepository travelRepository;
     private final RecommendationServiceClient recommendationClient;
+    private final AuditLogRepository auditLogRepository;
 
-    public TravelController(TravelRepository travelRepository, RecommendationServiceClient recommendationClient) {
+    public TravelController(TravelRepository travelRepository, RecommendationServiceClient recommendationClient,
+                             AuditLogRepository auditLogRepository) {
         this.travelRepository = travelRepository;
         this.recommendationClient = recommendationClient;
+        this.auditLogRepository = auditLogRepository;
     }
 
     @PostMapping
-    public ResponseEntity<CreateTravelResponse> createTravel(@RequestBody CreateTravelRequest req) {
+    public ResponseEntity<?> createTravel(@RequestBody CreateTravelRequest req, HttpServletRequest http) {
+        if (!travelRepository.isGroupMember(req.groupId(), req.createdBy())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "not a member of this group"));
+        }
+
         UUID[] ids = travelRepository.createTravelWithFirstVersion(req);
         UUID travelId = ids[0];
         UUID versionId = ids[1];
+
+        auditLogRepository.log(req.createdBy(), "travels", travelId, "CREATE",
+                "{\"title\":\"" + req.title() + "\"}", http.getRemoteAddr());
 
         Map<String, Object> payload = new HashMap<>();
         payload.put("travel_version_id", versionId.toString());

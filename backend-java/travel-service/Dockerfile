@@ -8,9 +8,7 @@ RUN mvn package -DskipTests -B
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
-
 RUN chgrp -R 0 /app && chmod -R g=u /app
 USER 1001
-
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]

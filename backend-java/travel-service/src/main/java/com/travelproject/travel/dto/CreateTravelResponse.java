@@ -1,4 +1,4 @@
-package com.travelproject.backend.dto;
+package com.travelproject.travel.dto;
 
 import java.util.UUID;
 

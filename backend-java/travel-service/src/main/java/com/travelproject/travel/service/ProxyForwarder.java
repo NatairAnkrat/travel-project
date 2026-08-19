@@ -1,4 +1,4 @@
-package com.travelproject.backend.service;
+package com.travelproject.travel.service;
 
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;

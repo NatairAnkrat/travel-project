@@ -37,6 +37,7 @@ jobs:
           oc apply -f infra/k8s/edit-service/
           oc apply -f infra/k8s/recommendation-service/
           oc apply -f infra/k8s/auth-service/
+          oc apply -f infra/k8s/group-service/
 
       - name: Roll out new images
         run: |

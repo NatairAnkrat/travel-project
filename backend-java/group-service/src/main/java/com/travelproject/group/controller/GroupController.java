@@ -51,8 +51,6 @@ public class GroupController {
         auditLogRepository.log(req.createdBy(), "invitations", token, "CREATE",
                 "{\"email\":\"" + req.email() + "\",\"group_id\":\"" + groupId + "\"}", http.getRemoteAddr());
 
-        // token — это то, что уходит в ссылку-приглашение на email (отправка самого письма — отдельная
-        // задача, здесь мы только выпускаем токен и возвращаем его вызывающей стороне)
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("invitation_token", token));
     }
 
@@ -87,5 +85,32 @@ public class GroupController {
         }
         invitationRepository.updateStatus(invitation.get().id(), "declined");
         return ResponseEntity.ok().build();
+    }
+	
+    @GetMapping("/{groupId}/members")
+    public ResponseEntity<java.util.List<GroupMemberView>> listMembers(@PathVariable UUID groupId) {
+        var members = groupRepository.listMembers(groupId).stream()
+                .map(m -> new GroupMemberView(m.userId(), m.login(), m.roleCode(), m.status()))
+                .toList();
+        return ResponseEntity.ok(members);
+    }
+
+    @PostMapping("/{groupId}/leave")
+    public ResponseEntity<Void> leaveGroup(@PathVariable UUID groupId, @RequestBody LeaveGroupRequest req,
+                                            HttpServletRequest http) {
+        var role = groupRepository.findMemberRole(groupId, req.userId());
+        if (role.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
+        if ("owner".equals(role.get())) {
+            // Владелец не может просто выйти — иначе группа осталась бы без ответственного.
+            // Передача владения — отдельная операция, которой пока нет; блокируем выход явным 409
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        }
+
+        groupRepository.removeMember(groupId, req.userId());
+        auditLogRepository.log(req.userId(), "group_members", groupId, "DELETE", null, http.getRemoteAddr());
+
+        return ResponseEntity.noContent().build();
     }
 }

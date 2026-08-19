@@ -48,4 +48,43 @@ public class GroupRepository {
         );
         return count != null && count > 0;
     }
+	
+    public record MemberRow(UUID userId, String login, String roleCode, String status) {}
+
+    public java.util.List<MemberRow> listMembers(UUID groupId) {
+        return jdbc.query(
+                """
+                SELECT u.id AS user_id, u.login, gr.code AS role_code, gm.status
+                FROM group_members gm
+                JOIN users u ON u.id = gm.user_id
+                JOIN group_roles gr ON gr.id = gm.role_id
+                WHERE gm.group_id = ?
+                ORDER BY gm.joined_at
+                """,
+                (rs, i) -> new MemberRow(
+                        UUID.fromString(rs.getString("user_id")),
+                        rs.getString("login"),
+                        rs.getString("role_code"),
+                        rs.getString("status")
+                ),
+                groupId
+        );
+    }
+
+    public Optional<String> findMemberRole(UUID groupId, UUID userId) {
+        var rows = jdbc.query(
+                """
+                SELECT gr.code FROM group_members gm
+                JOIN group_roles gr ON gr.id = gm.role_id
+                WHERE gm.group_id = ? AND gm.user_id = ?
+                """,
+                (rs, i) -> rs.getString("code"),
+                groupId, userId
+        );
+        return rows.stream().findFirst();
+    }
+
+    public void removeMember(UUID groupId, UUID userId) {
+        jdbc.update("DELETE FROM group_members WHERE group_id = ? AND user_id = ?", groupId, userId);
+    }
 }

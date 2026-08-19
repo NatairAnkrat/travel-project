@@ -110,3 +110,52 @@ jobs:
           tags: |
             ghcr.io/${{ env.OWNER_LC }}/recommendation-service:latest
             ghcr.io/${{ env.OWNER_LC }}/recommendation-service:${{ github.sha }}
+
+  build-edit-service:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set lowercase owner
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push edit-service
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend-python/edit-service
+          push: true
+          tags: |
+            ghcr.io/${{ env.OWNER_LC }}/edit-service:latest
+            ghcr.io/${{ env.OWNER_LC }}/edit-service:${{ github.sha }}
+
+  build-auth-service:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set lowercase owner
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push auth-service
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend-java/auth-service
+          push: true
+          tags: |
+            ghcr.io/${{ env.OWNER_LC }}/auth-service:latest
+            ghcr.io/${{ env.OWNER_LC }}/auth-service:${{ github.sha }}
+

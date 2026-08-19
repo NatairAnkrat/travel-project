@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import java.util.Optional;
 
 @Repository
 public class SessionRepository {
@@ -39,4 +40,33 @@ public class SessionRepository {
         );
         return token;
     }
+
+    public record RefreshTokenRecord(UUID id, UUID userId, UUID sessionId, OffsetDateTime expiresAt, boolean revoked) {}
+
+    public Optional<RefreshTokenRecord> findRefreshToken(String token) {
+        var rows = jdbc.query(
+                "SELECT id, user_id, session_id, expires_at, revoked FROM refresh_tokens WHERE token = ?",
+                (rs, i) -> new RefreshTokenRecord(
+                        UUID.fromString(rs.getString("id")),
+                        UUID.fromString(rs.getString("user_id")),
+                        UUID.fromString(rs.getString("session_id")),
+                        rs.getObject("expires_at", OffsetDateTime.class),
+                        rs.getBoolean("revoked")
+                ),
+                token
+        );
+        return rows.stream().findFirst();
+    }
+
+    public void revokeRefreshToken(UUID id) {
+        jdbc.update("UPDATE refresh_tokens SET revoked = true WHERE id = ?", id);
+    }
+
+    public void updateSessionToken(UUID sessionId, String newAccessToken, long ttlSeconds) {
+        jdbc.update(
+                "UPDATE user_sessions SET access_token = ?, expires_at = ? WHERE id = ?",
+                newAccessToken, OffsetDateTime.now().plusSeconds(ttlSeconds), sessionId
+        );
+    }
+
 }

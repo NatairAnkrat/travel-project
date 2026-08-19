@@ -69,4 +69,45 @@ public class AuthController {
 
         return ResponseEntity.ok(new AuthResponse(userId, accessToken, refreshToken, ttl));
     }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<AuthResponse> refresh(@RequestBody RefreshRequest req, HttpServletRequest http) {
+        var found = sessionRepository.findRefreshToken(req.refreshToken());
+        if (found.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        var token = found.get();
+
+        if (token.revoked() || token.expiresAt().isBefore(java.time.OffsetDateTime.now())) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        // Ротация: старый refresh-токен сразу гасим, выдаём новый — так украденный
+        // токен нельзя переиспользовать повторно после легитимного refresh
+        sessionRepository.revokeRefreshToken(token.id());
+
+        String newAccessToken = jwtService.generateAccessToken(token.userId());
+        long ttl = jwtService.accessTtlSeconds();
+        sessionRepository.updateSessionToken(token.sessionId(), newAccessToken, ttl);
+        String newRefreshToken = sessionRepository.createRefreshToken(token.userId(), token.sessionId(), 30);
+
+        auditLogRepository.log(token.userId(), "users", token.userId(), "REFRESH", null, http.getRemoteAddr());
+
+        return ResponseEntity.ok(new AuthResponse(token.userId(), newAccessToken, newRefreshToken, ttl));
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(@RequestBody LogoutRequest req, HttpServletRequest http) {
+        var found = sessionRepository.findRefreshToken(req.refreshToken());
+        if (found.isEmpty()) {
+            // Логаут несуществующим/уже отозванным токеном — не ошибка с точки зрения клиента,
+            // конечное состояние (токен недействителен) и так достигнуто
+            return ResponseEntity.noContent().build();
+        }
+        var token = found.get();
+        sessionRepository.revokeRefreshToken(token.id());
+        auditLogRepository.log(token.userId(), "users", token.userId(), "LOGOUT", null, http.getRemoteAddr());
+
+        return ResponseEntity.noContent().build();
+    }
 }

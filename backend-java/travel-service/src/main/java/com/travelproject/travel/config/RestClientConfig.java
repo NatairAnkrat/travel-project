@@ -1,4 +1,4 @@
-package com.travelproject.backend.config;
+package com.travelproject.travel.config;
 
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;

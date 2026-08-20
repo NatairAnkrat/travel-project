@@ -13,7 +13,6 @@ public class AuditLogRepository {
         this.jdbc = jdbc;
     }
 
-    /** newValueJson — уже сериализованный JSON-текст, или null. */
     public void log(UUID userId, String entityName, UUID entityId, String action, String newValueJson, String ipAddress) {
         jdbc.update(
                 """

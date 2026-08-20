@@ -11,7 +11,7 @@ public record CreateTravelRequest(
         String title,
         String description,
         @JsonProperty("destination_city_id") UUID destinationCityId,
-        @JsonProperty("start_date") String startDate,           // YYYY-MM-DD
+        @JsonProperty("start_date") String startDate,
         @JsonProperty("end_date") String endDate,
         List<GroupInput> groups,
         @JsonProperty("user_preferences") String userPreferences,

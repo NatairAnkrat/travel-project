@@ -1,6 +1,6 @@
 package com.travelproject.travel.controller;
 
-import com.travelproject.backend.service.ProxyForwarder;
+import com.travelproject.travel.service.ProxyForwarder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;

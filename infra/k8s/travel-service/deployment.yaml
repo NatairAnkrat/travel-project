@@ -19,6 +19,8 @@ spec:
           ports:
             - containerPort: 8080
           env:
+            - name: FRONTEND_ORIGIN
+              value: https://frontend-natairankrat-dev.apps.rm2.thpm.p1.openshiftapps.com
             - name: RECOMMENDATION_SERVICE_URL
               value: http://recommendation-service:8000
             - name: SEARCH_SERVICE_URL

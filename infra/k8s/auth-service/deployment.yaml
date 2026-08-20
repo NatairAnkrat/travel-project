@@ -19,6 +19,8 @@ spec:
           ports:
             - containerPort: 8080
           env:
+            - name: FRONTEND_ORIGIN
+              value: https://frontend-natairankrat-dev.apps.rm2.thpm.p1.openshiftapps.com
             - name: DB_HOST
               value: postgres-main
             - name: DB_PORT

@@ -32,6 +32,7 @@ jobs:
           oc apply -f infra/k8s/keepalive/
           oc apply -f infra/k8s/frontend-demo/
           oc apply -f infra/k8s/backend-python/
+          oc apply -f infra/k8s/backend-java/
           oc apply -f infra/k8s/search-service/
           oc apply -f infra/k8s/edit-service/
           oc apply -f infra/k8s/recommendation-service/

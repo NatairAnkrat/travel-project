@@ -1,0 +1,497 @@
+openapi: 3.0.3
+info:
+  title: travel-service
+  version: '0.1'
+  description: >
+    The frontend's main entry point for planning: creates travels/versions,
+    kicks off AI itinerary generation (recommendation-service), and proxies
+    flight/hotel/web search (search-service) and edits (edit-service)
+    verbatim so the frontend never talks to those internal services
+    directly. Publicly routed (infra/k8s/travel-service/route.yaml). No JWT
+    verification is implemented here yet — created_by/requested_by are
+    trusted as sent by the client (see docs/openapi/README.md, "Known gap").
+servers:
+  - url: /api/v1
+
+paths:
+  /travels:
+    post:
+      summary: >
+        Create a travel + its first travel_version, then kick off AI
+        itinerary generation in the background. Returns 202-style
+        immediately (201, since the travel/version rows are created
+        synchronously) with a job_id to poll at /travels/generation/{jobId}.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTravelRequest' }
+      responses:
+        '201':
+          description: Travel + version created, generation started
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateTravelResponse' }
+        '403':
+          description: caller is not a member of the given group
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { error: { type: string } }
+
+  /travels/generation/{jobId}:
+    parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Poll generation status/results for a travel created via POST /travels
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GenerationStatus' }
+
+  /travels/{travelId}/edit:
+    parameters:
+      - name: travelId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: >
+        Proxied verbatim to edit-service. Creates a new travel_version with
+        the requested changes applied on top of the current one, and
+        re-generates (with the previous plan as context so it revises
+        rather than replans). Only the fields being changed need to be sent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EditRequest' }
+      responses:
+        '202':
+          description: Edit version created, generation started
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EditCreatedResponse' }
+        '404': { description: travel/current version not found }
+        '422': { description: "changes is empty, or a date change was requested but the origin city couldn't be resolved" }
+
+  /edits/{jobId}:
+    parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Poll status for an edit created via POST /travels/{travelId}/edit (proxied to edit-service, same shape as generation status)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GenerationStatus' }
+        '404': { description: job not found }
+
+  /search/flights:
+    post:
+      summary: Proxied verbatim to search-service. Searches flights for one or more traveler groups around a base date.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FlightSearchRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FlightSearchResponse' }
+
+  /search/flights/baggage-price:
+    post:
+      summary: Proxied verbatim to search-service. Looks up baggage pricing for a specific flight offer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [origin, destination, departure_date, booking_token]
+              properties:
+                origin: { type: string }
+                destination: { type: string }
+                departure_date: { type: string }
+                booking_token: { type: string, description: "from the matching FlightOffer.booking_token" }
+                return_date: { type: string, nullable: true }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { baggage_info: { type: string } }
+
+  /search/hotels:
+    post:
+      summary: >
+        Proxied verbatim to search-service. Only searches date pairs the
+        caller already confirmed have flight availability — the frontend is
+        expected to call /search/flights first.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HotelSearchRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HotelSearchResponse' }
+
+  /search/hotels/property-details:
+    post:
+      summary: Proxied verbatim to search-service.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [property_token, location, check_in_date, check_out_date]
+              properties:
+                property_token: { type: string, description: "from the matching HotelOffer.property_token" }
+                location: { type: string }
+                check_in_date: { type: string }
+                check_out_date: { type: string }
+                adults: { type: integer, default: 1 }
+                children: { type: integer, default: 0 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { address: { type: string } }
+
+  /search/web:
+    post:
+      summary: Proxied verbatim to search-service. General web search, used as a research tool by generation, also usable directly.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: { type: string }
+                max_results: { type: integer, default: 5 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        title: { type: string }
+                        snippet: { type: string }
+                        link: { type: string }
+
+components:
+  schemas:
+    GroupInput:
+      type: object
+      required: [group_id, adults, children]
+      properties:
+        group_id: { type: integer, description: "caller-assigned, scoped to this travel — not a DB id" }
+        adults: { type: integer }
+        children: { type: integer, default: 0 }
+        budget_max: { type: number, nullable: true, description: "total budget for this group across flights+hotel+activities+food+local transport, EUR" }
+        wheelchair_accessible: { type: boolean, default: false }
+        preferences: { type: string, default: "", description: "free text: food/interest preferences for this group" }
+
+    CreateTravelRequest:
+      type: object
+      required: [group_id, created_by, title, destination_city_id, start_date, end_date, groups, user_preferences, travel_pace]
+      properties:
+        group_id: { type: string, format: uuid, description: "the travel_groups id — caller must already be a member" }
+        created_by: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        destination_city_id: { type: string, format: uuid }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        groups:
+          type: array
+          items: { $ref: '#/components/schemas/GroupInput' }
+        user_preferences: { type: string }
+        travel_pace: { type: string, example: moderate, description: "e.g. relaxed / moderate / packed" }
+        flight_offers:
+          type: array
+          items: { type: object }
+          description: "raw FlightOffer objects from /search/flights, already filtered by budget by the caller"
+        hotel_offers:
+          type: array
+          items: { type: object }
+          description: "raw HotelOffer objects from /search/hotels, already filtered by budget by the caller"
+
+    CreateTravelResponse:
+      type: object
+      properties:
+        travelId: { type: string, format: uuid }
+        travelVersionId: { type: string, format: uuid }
+        jobId: { type: string }
+
+    GenerationStatus:
+      type: object
+      description: >
+        Backed by search_requests/ai_jobs/ai_results. Poll until status is
+        'done' or 'failed'.
+      properties:
+        status: { type: string, enum: [processing, done, failed] }
+        started_at: { type: string, format: date-time, nullable: true }
+        finished_at: { type: string, format: date-time, nullable: true }
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              version: { type: integer, description: "corresponds to ItineraryOption.option_id" }
+              summary: { type: string, nullable: true, description: "on failure, this is the error message instead" }
+              option: { $ref: '#/components/schemas/ItineraryOption' }
+
+    ItineraryOption:
+      type: object
+      properties:
+        option_id: { type: integer }
+        summary: { type: string }
+        flight_selections:
+          type: array
+          items:
+            type: object
+            properties:
+              group_id: { type: integer }
+              airline_summary: { type: string }
+              price_eur: { type: number }
+              booking_url: { type: string }
+              baggage_info: { type: string, nullable: true }
+        hotel_selections:
+          type: array
+          items:
+            type: object
+            properties:
+              group_id: { type: integer }
+              hotel_name: { type: string }
+              address: { type: string }
+              latitude: { type: number }
+              longitude: { type: number }
+              price_eur: { type: number }
+              booking_url: { type: string }
+        days:
+          type: array
+          items:
+            type: object
+            properties:
+              day_number: { type: integer }
+              date: { type: string, format: date }
+              items:
+                type: array
+                items: { $ref: '#/components/schemas/ScheduleItem' }
+        price_breakdown:
+          type: array
+          items:
+            type: object
+            properties:
+              group_id: { type: integer }
+              flights_cost: { type: number }
+              hotel_cost: { type: number }
+              activities_cost: { type: number }
+              meals_cost: { type: number }
+              local_transport_cost: { type: number }
+              total_cost: { type: number }
+              budget_max: { type: number, nullable: true }
+              within_budget: { type: boolean }
+        final_recommendation: { type: string }
+
+    ScheduleItem:
+      type: object
+      properties:
+        time: { type: string, example: '14:30', description: "local start time, not a range" }
+        type: { type: string, enum: [transport, meal, activity, check_in, check_out, flight] }
+        title: { type: string }
+        description: { type: string }
+        location: { type: string }
+        latitude: { type: number, nullable: true }
+        longitude: { type: number, nullable: true }
+        duration_minutes: { type: integer }
+        transport_mode: { type: string, enum: [walking, transit, driving, cycling], nullable: true, description: "set only when type=transport" }
+        cost_eur: { type: number }
+        notes: { type: string }
+        url: { type: string, nullable: true }
+        applies_to_group_ids: { type: array, items: { type: integer }, description: "empty = all groups" }
+
+    GroupChange:
+      type: object
+      required: [group_id, adults]
+      properties:
+        group_id: { type: integer }
+        adults: { type: integer }
+        children: { type: integer, default: 0 }
+        budget_max: { type: number, nullable: true }
+        wheelchair_accessible: { type: boolean, default: false }
+        preferences: { type: string, default: "" }
+
+    EditRequest:
+      type: object
+      required: [requested_by, changes]
+      properties:
+        requested_by: { type: string, format: uuid }
+        changes:
+          type: object
+          description: "Only set fields you want to change; anything left null carries forward from the current version. At least one field must be set."
+          properties:
+            groups:
+              type: array
+              nullable: true
+              items: { $ref: '#/components/schemas/GroupChange' }
+              description: "merged by group_id — send only the group(s) you're changing, others are kept as-is"
+            user_preferences: { type: string, nullable: true }
+            travel_pace: { type: string, nullable: true }
+            start_date: { type: string, format: date, nullable: true, description: "changing dates triggers a flight/hotel re-search" }
+            end_date: { type: string, format: date, nullable: true }
+            instruction: { type: string, nullable: true, example: "swap the Italian place on day 2 for Thai, make day 3 cheaper" }
+
+    EditCreatedResponse:
+      type: object
+      properties:
+        job_id: { type: string }
+        travel_version_id: { type: string, format: uuid }
+        version_number: { type: integer }
+
+    FlightGroupInput:
+      allOf:
+        - $ref: '#/components/schemas/GroupInput'
+        - type: object
+          properties:
+            children_ages: { type: array, items: { type: integer }, description: "one entry per child, 0-17" }
+
+    FlightSearchRequest:
+      type: object
+      required: [origin_city, destination_city, base_departure_date, trip_length_nights, groups]
+      properties:
+        origin_city: { type: string, example: Paris }
+        destination_city: { type: string, example: Berlin }
+        base_departure_date: { type: string, format: date }
+        trip_length_nights: { type: integer }
+        date_range_days: { type: integer, default: 2, description: "search base date +/- this many days" }
+        top_n_outbound: { type: integer, default: 1 }
+        groups:
+          type: array
+          items: { $ref: '#/components/schemas/FlightGroupInput' }
+
+    FlightOffer:
+      type: object
+      properties:
+        group_id: { type: integer }
+        group_composition: { type: string }
+        group_size: { type: integer }
+        outbound_date: { type: string }
+        return_date: { type: string }
+        airline_outbound: { type: string }
+        airline_return: { type: string }
+        price: { type: number, nullable: true }
+        currency: { type: string }
+        outbound_departure_time: { type: string }
+        outbound_arrival_time: { type: string }
+        return_departure_time: { type: string }
+        return_arrival_time: { type: string }
+        origin_airport: { type: string }
+        destination_airport: { type: string }
+        origin_latitude: { type: number, nullable: true }
+        origin_longitude: { type: number, nullable: true }
+        destination_latitude: { type: number, nullable: true }
+        destination_longitude: { type: number, nullable: true }
+        outbound_stops: { type: integer, nullable: true }
+        return_stops: { type: integer, nullable: true }
+        booking_url: { type: string }
+        booking_token: { type: string, description: "opaque — required for /search/flights/baggage-price" }
+        status: { type: string }
+        note: { type: string }
+
+    FlightSearchResponse:
+      type: object
+      properties:
+        resolved_origin: { type: string }
+        resolved_destination: { type: string }
+        offers:
+          type: array
+          items: { $ref: '#/components/schemas/FlightOffer' }
+
+    HotelGroupInput:
+      allOf:
+        - $ref: '#/components/schemas/GroupInput'
+        - type: object
+          properties:
+            children_ages: { type: array, items: { type: integer } }
+
+    HotelSearchRequest:
+      type: object
+      required: [stay_date_ranges, groups]
+      properties:
+        location: { type: string, default: "Berlin, Germany" }
+        stay_date_ranges:
+          type: array
+          items:
+            type: array
+            items: { type: string }
+          description: "[check_in, check_out] pairs — use the outbound_date/return_date of whichever FlightOffers you're pricing hotels for"
+        groups:
+          type: array
+          items: { $ref: '#/components/schemas/HotelGroupInput' }
+
+    HotelOffer:
+      type: object
+      properties:
+        group_id: { type: integer }
+        group_composition: { type: string }
+        group_size: { type: integer }
+        wheelchair_accessible: { type: boolean }
+        check_in_date: { type: string }
+        check_out_date: { type: string }
+        location: { type: string, description: "needed for /search/hotels/property-details" }
+        property_name: { type: string }
+        property_type: { type: string }
+        property_token: { type: string, description: "needed for /search/hotels/property-details" }
+        total_price: { type: number, nullable: true }
+        currency: { type: string }
+        rate_per_night: { type: number, nullable: true }
+        overall_rating: { type: number, nullable: true }
+        hotel_class: { type: integer, nullable: true }
+        latitude: { type: number, nullable: true }
+        longitude: { type: number, nullable: true }
+        address: { type: string }
+        amenities_summary: { type: string }
+        booking_url: { type: string }
+        status: { type: string }
+        note: { type: string }
+
+    HotelSearchResponse:
+      type: object
+      properties:
+        offers:
+          type: array
+          items: { $ref: '#/components/schemas/HotelOffer' }

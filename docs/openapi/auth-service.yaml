@@ -1,0 +1,120 @@
+openapi: 3.0.3
+info:
+  title: auth-service
+  version: '0.1'
+  description: >
+    Registration, login, and session/refresh-token management. Publicly routed
+    (infra/k8s/auth-service/route.yaml). Access tokens are opaque here for the
+    frontend's purposes (JWT); they must be sent as a bearer token to
+    group-service and travel-service, but note those services do not
+    currently verify it (see docs/openapi/README.md).
+servers:
+  - url: /api/v1/auth
+
+paths:
+  /register:
+    post:
+      summary: Create a new account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: { type: string, format: uuid }
+
+  /login:
+    post:
+      summary: Authenticate and start a session (creates a user_sessions row + a rotating refresh token)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '401': { description: invalid login or password }
+
+  /refresh:
+    post:
+      summary: >
+        Exchange a refresh token for a new access + refresh token pair. The
+        old refresh token is revoked immediately on use (rotation) — reusing
+        it fails, so the frontend must always store the newest one returned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '401': { description: refresh token missing, revoked, or expired }
+
+  /logout:
+    post:
+      summary: Revoke a refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '204':
+          description: >
+            Logged out. Also returned (not an error) if the token was already
+            invalid/revoked — logout is idempotent by design.
+
+components:
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [login, password, email, first_name, last_name, language_id, currency_id, timezone]
+      properties:
+        login: { type: string }
+        password: { type: string, format: password }
+        email: { type: string, format: email }
+        phone: { type: string, nullable: true }
+        first_name: { type: string }
+        last_name: { type: string }
+        language_id: { type: string, format: uuid, description: "FK to languages — frontend must resolve this from a reference-data lookup first" }
+        currency_id: { type: string, format: uuid, description: "FK to currencies" }
+        timezone: { type: string }
+
+    LoginRequest:
+      type: object
+      required: [login, password]
+      properties:
+        login: { type: string, description: login or email }
+        password: { type: string, format: password }
+        device: { type: string, nullable: true, description: "free-text device label, stored on user_sessions" }
+
+    AuthResponse:
+      type: object
+      properties:
+        userId: { type: string, format: uuid }
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        expiresInSeconds: { type: integer }

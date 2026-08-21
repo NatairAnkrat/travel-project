@@ -1,0 +1,153 @@
+openapi: 3.0.3
+info:
+  title: group-service
+  version: '0.1'
+  description: >
+    Travel groups, membership, and invitations. Publicly routed
+    (infra/k8s/group-service/route.yaml). No JWT verification is implemented
+    here yet — created_by/user_id fields below are trusted as sent by the
+    client (see docs/openapi/README.md, "Known gap").
+servers:
+  - url: /api/v1/groups
+
+paths:
+  /:
+    post:
+      summary: Create a group (creator is auto-added as owner)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateGroupRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  group_id: { type: string, format: uuid }
+
+  /{groupId}/invitations:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    post:
+      summary: Invite someone by email (caller must already be a member; 403 otherwise)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InviteRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invitation_token: { type: string, format: uuid }
+        '403': { description: caller is not a member of this group }
+
+  /invitations/{token}/accept:
+    parameters:
+      - $ref: '#/components/parameters/InvitationToken'
+    post:
+      summary: Accept an invitation and join as a member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AcceptInviteRequest' }
+      responses:
+        '200': { description: Joined }
+        '404': { description: invitation not found, or not pending }
+        '410': { description: invitation expired (its status is flipped to 'expired' as a side effect) }
+
+  /invitations/{token}/decline:
+    parameters:
+      - $ref: '#/components/parameters/InvitationToken'
+    post:
+      summary: Decline an invitation
+      responses:
+        '200': { description: Declined }
+        '404': { description: invitation not found }
+
+  /{groupId}/members:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      summary: List group members
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/GroupMemberView' }
+
+  /{groupId}/leave:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    post:
+      summary: Leave a group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeaveGroupRequest' }
+      responses:
+        '204': { description: Left the group }
+        '404': { description: caller is not a member }
+        '409': { description: "caller is the group's owner — ownership transfer isn't implemented, so an owner cannot leave" }
+
+components:
+  parameters:
+    GroupId:
+      name: groupId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    InvitationToken:
+      name: token
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    CreateGroupRequest:
+      type: object
+      required: [name, created_by]
+      properties:
+        name: { type: string }
+        description: { type: string, nullable: true }
+        created_by: { type: string, format: uuid }
+
+    InviteRequest:
+      type: object
+      required: [email, created_by]
+      properties:
+        email: { type: string, format: email }
+        created_by: { type: string, format: uuid, description: "must already be a member of the group" }
+
+    AcceptInviteRequest:
+      type: object
+      required: [user_id]
+      properties:
+        user_id: { type: string, format: uuid }
+
+    LeaveGroupRequest:
+      type: object
+      required: [user_id]
+      properties:
+        user_id: { type: string, format: uuid }
+
+    GroupMemberView:
+      type: object
+      properties:
+        userId: { type: string, format: uuid }
+        login: { type: string }
+        roleCode: { type: string, example: owner }
+        status: { type: string }
